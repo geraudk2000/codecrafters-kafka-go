@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
@@ -14,7 +15,7 @@ func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
 
-	//buf := make([]byte, 1024)
+	buf := make([]byte, 1024)
 	// TODO: Uncomment the code below to pass the first stage
 	//
 	l, err := net.Listen("tcp", "0.0.0.0:9092")
@@ -28,10 +29,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	response := []byte{
-		0, 0, 0, 0,
-		0, 0, 0, 7,
+	n, err := conn.Read(buf)
+	if err != nil {
+		fmt.Println("error reading:", err)
+		return
 	}
+	if n < 12 {
+		fmt.Println("Request too short")
+		return
+	}
+	correleationID := binary.BigEndian.Uint32(buf[8:12])
+	response := make([]byte, 8)
+
+	binary.BigEndian.PutUint32(response[0:4], 0)
+	binary.BigEndian.PutUint32(response[4:8], correleationID)
+
 	conn.Write(response)
 
 }
