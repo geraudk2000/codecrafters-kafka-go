@@ -44,7 +44,7 @@ func main() {
 	correleationID := binary.BigEndian.Uint32(buf[8:12])
 	request_api_version := binary.BigEndian.Uint16(buf[6:8])
 
-	binary.BigEndian.PutUint32(response[0:4], 0)
+	binary.BigEndian.PutUint32(response[0:4], 19)
 	binary.BigEndian.PutUint32(response[4:8], correleationID)
 
 	if request_api_version <= 4 {
