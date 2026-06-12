@@ -15,7 +15,6 @@ func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
 
-	buf := make([]byte, 1024)
 	// TODO: Uncomment the code below to pass the first stage
 	//
 	l, err := net.Listen("tcp", "0.0.0.0:9092")
@@ -39,7 +38,7 @@ func main() {
 
 func handleConn(conn net.Conn) {
 	defer conn.Close()
-
+	buf := make([]byte, 1024)
 	n, err := conn.Read(buf)
 	if err != nil {
 		fmt.Println("error reading:", err)
