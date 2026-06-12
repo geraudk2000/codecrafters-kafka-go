@@ -38,7 +38,9 @@ func main() {
 		fmt.Println("Request too short")
 		return
 	}
-	response := make([]byte, 10)
+	response := make([]byte, 23)
+	//body := make([]byte, 15)
+
 	correleationID := binary.BigEndian.Uint32(buf[8:12])
 	request_api_version := binary.BigEndian.Uint16(buf[6:8])
 
@@ -52,6 +54,18 @@ func main() {
 	} else {
 		binary.BigEndian.PutUint16(response[8:10], 35)
 	}
+
+	response[10] = 2
+
+	binary.BigEndian.PutUint16(response[11:13], 18)
+	binary.BigEndian.PutUint16(response[13:15], 0)
+	binary.BigEndian.PutUint16(response[15:17], 4)
+
+	response[17] = 0
+
+	binary.BigEndian.PutUint16(response[18:22], 0)
+
+	response[22] = 0
 
 	conn.Write(response)
 
