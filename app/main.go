@@ -100,10 +100,10 @@ func handleConn(conn net.Conn) {
 
 		// response[18:22] throttle_time_ms = 0 (no throttling).
 		// NOTE: this field is an int32 (4 bytes) — see the question below about PutUint16 here.
-		binary.BigEndian.PutUint32(response[25:27], 0)
+		binary.BigEndian.PutUint32(response[25:29], 0)
 
 		// response[22] tagged_fields for the whole response: 0 = none.
-		response[27] = 0
+		response[29] = 0
 
 		conn.Write(response)
 	}
