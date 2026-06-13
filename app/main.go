@@ -50,7 +50,7 @@ func handleConn(conn net.Conn) {
 			fmt.Println("Request too short")
 			return
 		}
-		response := make([]byte, 33)
+		response := make([]byte, 30)
 		//body := make([]byte, 15)
 
 		// --- Parse the REQUEST header ---
@@ -62,8 +62,10 @@ func handleConn(conn net.Conn) {
 		request_api_version := binary.BigEndian.Uint16(buf[6:8])
 
 		// --- Build the RESPONSE ---
-		// response[0:4]  message_size: number of bytes that follow this field (23 total - 4 = 19).
-		binary.BigEndian.PutUint32(response[0:4], 29)
+		// response[0:4]  message_size: number of bytes that follow this field.
+		// Layout after this field: correlation_id(4) + error_code(2) + array_len(1)
+		//   + entry#1(7) + entry#2(7) + throttle_time(4) + tag_buffer(1) = 26 bytes.
+		binary.BigEndian.PutUint32(response[0:4], 26)
 		// response[4:8]  correlation_id: echoed straight back from the request.
 		binary.BigEndian.PutUint32(response[4:8], correleationID)
 
@@ -77,32 +79,34 @@ func handleConn(conn net.Conn) {
 			binary.BigEndian.PutUint16(response[8:10], 35)
 		}
 
-		// response[10] num_api_keys: this is a COMPACT array, whose length is encoded as N+1.
-		// We advertise 1 ApiKey, so we write 2.
+		// response[10] num_api_keys: COMPACT array, length encoded as N+1.
+		// We advertise 2 APIs (ApiVersions + DescribeTopicPartitions), so we write 3.
 		response[10] = 3
 
-		// --- One entry in the api_keys array ---
-		// response[11:13] api_key   = 18 (this is the ApiVersions API itself)
+		// --- Entry #1: ApiVersions (api_key 18) ---  7 bytes, [11:18]
+		// response[11:13] api_key     = 18
 		binary.BigEndian.PutUint16(response[11:13], 18)
-		// response[13:15] min_version we support = 0
+		// response[13:15] min_version = 0
 		binary.BigEndian.PutUint16(response[13:15], 0)
-		// response[15:17] max_version we support = 4
+		// response[15:17] max_version = 4
 		binary.BigEndian.PutUint16(response[15:17], 4)
-
-		// response[17] tagged_fields for this array entry: 0 = none (end of the entry).
+		// response[17]    tagged_fields = 0 (end of this entry)
 		response[17] = 0
 
-		//
+		// --- Entry #2: DescribeTopicPartitions (api_key 75) ---  7 bytes, [18:25]
+		// response[18:20] api_key     = 75
 		binary.BigEndian.PutUint16(response[18:20], 75)
+		// response[20:22] min_version = 0
 		binary.BigEndian.PutUint16(response[20:22], 0)
+		// response[22:24] max_version = 0
 		binary.BigEndian.PutUint16(response[22:24], 0)
+		// response[24]    tagged_fields = 0 (end of this entry)
 		response[24] = 0
 
-		// response[18:22] throttle_time_ms = 0 (no throttling).
-		// NOTE: this field is an int32 (4 bytes) — see the question below about PutUint16 here.
+		// response[25:29] throttle_time_ms = 0 (INT32, 4 bytes -> PutUint32).
 		binary.BigEndian.PutUint32(response[25:29], 0)
 
-		// response[22] tagged_fields for the whole response: 0 = none.
+		// response[29] tagged_fields for the whole response: 0 = none.
 		response[29] = 0
 
 		conn.Write(response)
