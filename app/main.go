@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sort"
 )
 
 type UUID [16]byte
@@ -69,7 +70,7 @@ func handleConn(conn net.Conn) {
 		case 75:
 			topicName := parseDescribeTopicPartitionsTopicName(buf[:n])
 
-			data, err := getData(correlationID, topicName)
+			data, err := getData()
 			if err != nil {
 				fmt.Println("error reading metadata:", err)
 				return
@@ -135,13 +136,13 @@ func buildApiVersionsResponse(correlationID uint32, apiVersion uint16) []byte {
 	return response
 }
 
-func parseDescribeTopicPartitionsTopicName(buf []byte) string {
+func parseDescribeTopicPartitionsTopicNames(buf []byte) []string {
 	// Request layout:
 	// 0:4   message_size
 	// 4:6   api_key
 	// 6:8   api_version
 	// 8:12  correlation_id
-	// 12:14 client_id length
+	// 12:14 client_id length  (normal string: int16 length prefix)
 	clientIDLen := int(binary.BigEndian.Uint16(buf[12:14]))
 
 	pos := 14 + clientIDLen
@@ -149,21 +150,26 @@ func parseDescribeTopicPartitionsTopicName(buf []byte) string {
 	// request header TAG_BUFFER
 	pos++
 
-	// topics compact array length
+	// topics COMPACT_ARRAY: stored as (realCount + 1)
 	topicCount := int(buf[pos]) - 1
 	pos++
 
-	if topicCount <= 0 {
-		return ""
+	names := make([]string, 0, max(topicCount, 0))
+
+	// One iteration per requested topic.
+	for i := 0; i < topicCount; i++ {
+		// topic name: COMPACT_STRING, length stored as (len + 1)
+		nameLen := int(buf[pos]) - 1
+		pos++
+
+		names = append(names, string(buf[pos:pos+nameLen]))
+		pos += nameLen
+
+		// each topic entry ends with its own TAG_BUFFER
+		pos++
 	}
 
-	// topic_name compact string length
-	nameLen := int(buf[pos]) - 1
-	pos++
-
-	topicName := string(buf[pos : pos+nameLen])
-
-	return topicName
+	return names
 }
 
 func buildDescribeTopicPartitionsUnknownTopicResponse(correlationID uint32, topicName string) []byte {
@@ -223,9 +229,9 @@ func appendCompactInt32Array(body []byte, xs []int32) []byte {
 	return body
 }
 
-func buildDescribeTopicPartitionsTopicResponse(correlationID uint32, topicName string, meta ClusterMetadata) []byte {
-	id := meta.topicUUIDByName[topicName]
-	partitions := meta.partitionsByUUID[id]
+func buildDescribeTopicPartitionsTopicResponse(correlationID uint32, names []string, meta ClusterMetadata) []byte {
+
+	sort.Strings(names)
 
 	body := []byte{}
 
@@ -237,41 +243,54 @@ func buildDescribeTopicPartitionsTopicResponse(correlationID uint32, topicName s
 	body = binary.BigEndian.AppendUint32(body, 0)
 
 	// topics compact array: 1 topic => 1 + 1 = 2
-	body = append(body, 2)
+	body = append(body, byte(len(names)+1))
 
-	// error_code: 0 (topic exists)
-	body = binary.BigEndian.AppendUint16(body, 0)
+	for _, name := range names {
 
-	// topic_name as COMPACT_STRING
-	body = append(body, byte(len(topicName)+1))
-	body = append(body, []byte(topicName)...)
+		id, ok := meta.topicUUIDByName[name]
+		partitions := meta.partitionsByUUID[id]
 
-	// topic_id: the real UUID from the metadata log
-	body = append(body, id[:]...)
+		if ok {
+			body = binary.BigEndian.AppendUint16(body, 0) // exists
+		} else {
+			body = binary.BigEndian.AppendUint16(body, 3) // unknown
+		}
 
-	// is_internal: false
-	body = append(body, 0)
+		// topic_name as COMPACT_STRING
+		body = append(body, byte(len(name)+1))
+		body = append(body, []byte(name)...)
 
-	// partitions compact array: len(partitions) + 1
-	body = append(body, byte(len(partitions)+1))
-	for _, p := range partitions {
-		body = binary.BigEndian.AppendUint16(body, 0)            // error_code
-		body = binary.BigEndian.AppendUint32(body, uint32(p.id)) // partition_index
-		body = binary.BigEndian.AppendUint32(body, uint32(p.leaderID))
-		body = binary.BigEndian.AppendUint32(body, uint32(p.leaderEpoch))
-		body = appendCompactInt32Array(body, p.replicas) // replica_nodes
-		body = appendCompactInt32Array(body, p.isr)      // isr_nodes
-		body = append(body, 1)                           // eligible_leader_replicas: empty
-		body = append(body, 1)                           // last_known_elr: empty
-		body = append(body, 1)                           // offline_replicas: empty
-		body = append(body, 0)                           // partition TAG_BUFFER
+		// topic_id: the real UUID from the metadata log
+		body = append(body, id[:]...)
+
+		// is_internal: false
+		body = append(body, 0)
+
+		// partitions compact array: len(partitions) + 1
+		body = append(body, byte(len(partitions)+1))
+		for _, p := range partitions {
+			body = binary.BigEndian.AppendUint16(body, 0)            // error_code
+			body = binary.BigEndian.AppendUint32(body, uint32(p.id)) // partition_index
+			body = binary.BigEndian.AppendUint32(body, uint32(p.leaderID))
+			body = binary.BigEndian.AppendUint32(body, uint32(p.leaderEpoch))
+			body = appendCompactInt32Array(body, p.replicas) // replica_nodes
+			body = appendCompactInt32Array(body, p.isr)      // isr_nodes
+			body = append(body, 1)                           // eligible_leader_replicas: empty
+			body = append(body, 1)                           // last_known_elr: empty
+			body = append(body, 1)                           // offline_replicas: empty
+			body = append(body, 0)                           // partition TAG_BUFFER
+		}
+
+		// topic_authorized_operations
+		body = binary.BigEndian.AppendUint32(body, 0)
+
+		// topic TAG_BUFFER
+		body = append(body, 0)
+
+		// error_code: 0 (topic exists)
+		body = binary.BigEndian.AppendUint16(body, 0)
+
 	}
-
-	// topic_authorized_operations
-	body = binary.BigEndian.AppendUint32(body, 0)
-
-	// topic TAG_BUFFER
-	body = append(body, 0)
 
 	// next_cursor: null => 0xff
 	body = append(body, 0xff)
@@ -285,7 +304,7 @@ func buildDescribeTopicPartitionsTopicResponse(correlationID uint32, topicName s
 	return response
 }
 
-func getData(correlation_id uint32, topic_name string) ([]byte, error) {
+func getData() ([]byte, error) {
 
 	filepath := "/tmp/kraft-combined-logs/__cluster_metadata-0/00000000000000000000.log"
 
