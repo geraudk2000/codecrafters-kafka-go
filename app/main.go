@@ -68,7 +68,7 @@ func handleConn(conn net.Conn) {
 			response = buildApiVersionsResponse(correlationID, apiVersion)
 
 		case 75:
-			topicName := parseDescribeTopicPartitionsTopicName(buf[:n])
+			names := parseDescribeTopicPartitionsTopicNames(buf[:n])
 
 			data, err := getData()
 			if err != nil {
@@ -77,11 +77,7 @@ func handleConn(conn net.Conn) {
 			}
 			meta := parseClusterMetadata(data)
 
-			if _, ok := meta.topicUUIDByName[topicName]; ok {
-				response = buildDescribeTopicPartitionsTopicResponse(correlationID, topicName, meta)
-			} else {
-				response = buildDescribeTopicPartitionsUnknownTopicResponse(correlationID, topicName)
-			}
+			response = buildDescribeTopicPartitionsTopicResponse(correlationID, names, meta)
 
 		default:
 			fmt.Println("unsupported api key:", apiKey)
