@@ -283,9 +283,6 @@ func buildDescribeTopicPartitionsTopicResponse(correlationID uint32, names []str
 		// topic TAG_BUFFER
 		body = append(body, 0)
 
-		// error_code: 0 (topic exists)
-		body = binary.BigEndian.AppendUint16(body, 0)
-
 	}
 
 	// next_cursor: null => 0xff
